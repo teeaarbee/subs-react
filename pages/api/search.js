@@ -63,14 +63,13 @@ export default async function handler(req, res) {
     let srtFiles = searchCache.get(fileListCacheKey);
     
     if (!srtFiles) {
-      const Contents = await listAllObjects(s3, process.env.CLOUDFLARE_BUCKET_NAME);
-      srtFiles = Contents.filter(file => file.Key.toLowerCase().endsWith('.srt'));
+      srtFiles = await listAllObjects(s3, process.env.CLOUDFLARE_BUCKET_NAME);
       searchCache.set(fileListCacheKey, srtFiles, 3600);
     }
 
     // Instead of limiting to first 10 files, let's process in batches
     const BATCH_SIZE = 5; // Reduce batch size
-    const MAX_TOTAL_FILES = 20; // Limit total files processed
+    const MAX_TOTAL_FILES = 60; // Temporarily increased from 20
 
     const allFiles = srtFiles
       .filter(file => file.Key.toLowerCase().endsWith('.srt'))
@@ -98,11 +97,21 @@ export default async function handler(req, res) {
       }
     }
 
+    console.log(`Total occurrences found: ${allOccurrences.length}`);
+
+    // Log sample occurrences
+    if (allOccurrences.length > 0) {
+      console.log('Sample occurrence:', allOccurrences[0]);
+    }
+
+    const isPartial = allOccurrences.length > 100;
+
     const result = {
       occurrences: allOccurrences,
       totalCount: allOccurrences.length,
       totalFiles: allFiles.length,
-      processedFiles: allFiles.length
+      processedFiles: allFiles.length,
+      isPartial
     };
     
     searchCache.set(cacheKey, result);
@@ -124,60 +133,38 @@ export default async function handler(req, res) {
 
 async function listAllObjects(s3, bucket, prefix = '') {
   let allObjects = [];
-  let continuationToken = undefined;
-  const MAX_KEYS = 1000;
 
   try {
-    do {
-      const params = {
-        Bucket: bucket,
-        Prefix: prefix,
-        MaxKeys: MAX_KEYS,
-        ContinuationToken: continuationToken,
-        Delimiter: '/'
-      };
-
-      const response = await s3.listObjectsV2(params).promise();
-      
-      // Process files in current directory
-      if (response.Contents) {
-        const files = response.Contents.filter(obj => {
-          const key = obj.Key.toLowerCase();
-          return key.endsWith('.srt') && !key.endsWith('/');
-        });
-        allObjects = allObjects.concat(files);
-        console.log(`Found ${files.length} files in ${prefix || 'root'}, total: ${allObjects.length}`);
+    const params = {
+      Bucket: bucket,
+      Prefix: prefix,
+      MaxKeys: 1000,
+      Delimiter: '/'  // Use delimiter to get folders
+    };
+    
+    const response = await s3.listObjectsV2(params).promise();
+    
+    // Add files from current directory
+    if (response.Contents) {
+      const files = response.Contents.filter(obj => obj.Key.toLowerCase().endsWith('.srt'));
+      allObjects = allObjects.concat(files);
+      console.log(`Found ${files.length} .srt files in ${prefix || 'root'}`);
+    }
+    
+    // Recursively process subfolders
+    if (response.CommonPrefixes) {
+      for (const commonPrefix of response.CommonPrefixes) {
+        const subPrefix = commonPrefix.Prefix;
+        console.log(`Entering subfolder: ${subPrefix}`);
+        const subFolderObjects = await listAllObjects(s3, bucket, subPrefix);
+        allObjects = allObjects.concat(subFolderObjects);
       }
-
-      // Process subfolders
-      if (response.CommonPrefixes && response.CommonPrefixes.length > 0) {
-        console.log(`Found folders: ${response.CommonPrefixes.map(p => p.Prefix).join(', ')}`);
-        
-        // Recursively process each subfolder
-        const subfolderPromises = response.CommonPrefixes.map(async ({ Prefix }) => {
-          console.log(`Processing folder: ${Prefix}`);
-          const subfolderObjects = await listAllObjects(s3, bucket, Prefix);
-          return subfolderObjects;
-        });
-
-        const subfolderResults = await Promise.all(subfolderPromises);
-        subfolderResults.forEach(objects => {
-          allObjects = allObjects.concat(objects);
-        });
-      }
-      
-      continuationToken = response.NextContinuationToken;
-    } while (continuationToken);
-
-    console.log(`Total files found in ${prefix || 'root'}: ${allObjects.length}`);
+    }
+    
     return allObjects;
-
+    
   } catch (error) {
-    console.error('Error listing objects:', {
-      message: error.message,
-      prefix: prefix,
-      objectCount: allObjects.length
-    });
+    console.error('Error listing objects:', error);
     throw error;
   }
 }

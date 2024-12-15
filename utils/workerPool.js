@@ -6,6 +6,7 @@ class WorkerPool {
   }
 
   async execute(task) {
+    console.log('Task added to the pool');
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         reject(new Error('Task timeout'));
@@ -30,15 +31,21 @@ class WorkerPool {
     if (this.tasks.length === 0) return;
 
     const workerIndex = this.workers.findIndex(worker => worker === null);
-    if (workerIndex === -1) return;
+    if (workerIndex === -1) {
+      console.log('No available workers');
+      return;
+    }
 
     const { task, resolve, reject } = this.tasks.shift();
+    console.log(`Assigning task to worker ${workerIndex}`);
     this.workers[workerIndex] = task;
 
     try {
       const result = await task();
+      console.log(`Task completed by worker ${workerIndex}`);
       resolve(result);
     } catch (error) {
+      console.error(`Task failed on worker ${workerIndex}:`, error);
       reject(error);
     } finally {
       this.workers[workerIndex] = null;

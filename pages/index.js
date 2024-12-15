@@ -24,6 +24,7 @@ const Home = () => {
       const cacheKey = searchTerm.toLowerCase();
       if (searchCache.current.has(cacheKey)) {
         const cachedData = searchCache.current.get(cacheKey);
+        console.log('Cache hit:', cachedData);
         setResults(cachedData.occurrences);
         setTotalCount(cachedData.totalCount);
         return;
@@ -42,6 +43,8 @@ const Home = () => {
           }, {
             timeout: 30000 // Increase to 30 seconds
           });
+          
+          console.log('API Response:', response.data);
           
           // Cache the results
           searchCache.current.set(cacheKey, response.data);
