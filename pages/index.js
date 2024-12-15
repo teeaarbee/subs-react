@@ -34,34 +34,42 @@ const Home = () => {
       setResults([]);
       setTotalCount(0);
       
-      try {
-        const response = await axios.post('/api/search', { 
-          searchWord: searchTerm 
-        }, {
-          timeout: 20000 // Increase to 20 seconds
-        });
-        
-        // Cache the results
-        searchCache.current.set(cacheKey, response.data);
-        setResults(response.data.occurrences);
-        setTotalCount(response.data.totalCount);
-        
-        // Show message if results are partial
-        if (response.data.isPartial) {
-          setError('Showing first 10 matches. Refine your search for more specific results.');
+      const maxRetries = 3;
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const response = await axios.post('/api/search', { 
+            searchWord: searchTerm 
+          }, {
+            timeout: 30000 // Increase to 30 seconds
+          });
+          
+          // Cache the results
+          searchCache.current.set(cacheKey, response.data);
+          setResults(response.data.occurrences);
+          setTotalCount(response.data.totalCount);
+          
+          // Show message if results are partial
+          if (response.data.isPartial) {
+            setError('Showing partial results. Try a more specific search term.');
+          }
+          break; // Success, exit retry loop
+        } catch (error) {
+          console.error(`Attempt ${i + 1} failed:`, error);
+          if (i === maxRetries - 1) {
+            if (error.code === 'ECONNABORTED' || error.response?.status === 504) {
+              setError('Search timed out. Please try a more specific search term.');
+            } else {
+              setError(error.response?.data?.message || 'An error occurred while searching');
+            }
+            setResults([]);
+            setTotalCount(0);
+          } else {
+            // Wait before retrying (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+          }
         }
-      } catch (error) {
-        console.error("Error searching files:", error);
-        if (error.code === 'ECONNABORTED' || error.response?.status === 504) {
-          setError('Search timed out. Try a more specific search term.');
-        } else {
-          setError(error.response?.data?.message || 'An error occurred while searching');
-        }
-        setResults([]);
-        setTotalCount(0);
-      } finally {
-        setIsLoading(false);
       }
+      setIsLoading(false);
     }, 500),
     [setResults, setTotalCount, setError, setIsLoading]
   );

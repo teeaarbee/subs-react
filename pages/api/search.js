@@ -1,6 +1,7 @@
 import { S3 } from 'aws-sdk';
 import NodeCache from 'node-cache';
 import WorkerPool from '../../utils/workerPool';
+import { optimizeSearchTerm } from '../../utils/searchOptimizer';
 
 // Initialize with smaller pool and shorter timeout
 const workerPool = new WorkerPool(5, 15000); // 15 second timeout
@@ -68,13 +69,14 @@ export default async function handler(req, res) {
     }
 
     // Instead of limiting to first 10 files, let's process in batches
-    const BATCH_SIZE = 10; // Smaller batch size
-    const allFiles = srtFiles.filter(file => {
-      // Add any specific folder patterns you want to include
-      return file.Key.toLowerCase().endsWith('.srt');
-    });
+    const BATCH_SIZE = 5; // Reduce batch size
+    const MAX_TOTAL_FILES = 20; // Limit total files processed
 
-    console.log(`Total SRT files found: ${allFiles.length}`);
+    const allFiles = srtFiles
+      .filter(file => file.Key.toLowerCase().endsWith('.srt'))
+      .slice(0, MAX_TOTAL_FILES); // Limit total files
+
+    console.log(`Processing ${allFiles.length} files`);
 
     // Process files in batches
     const batches = [];
@@ -85,9 +87,15 @@ export default async function handler(req, res) {
     let allOccurrences = [];
     for (const batch of batches) {
       const results = await Promise.all(
-        batch.map(file => processFile(file, s3, searchWord))
+        batch.map(file => processFile(file, s3, optimizeSearchTerm(searchWord)))
       );
       allOccurrences = allOccurrences.concat(results.flat());
+      
+      // Early exit if we found enough results
+      if (allOccurrences.length > 100) {
+        console.log('Found enough results, stopping early');
+        break;
+      }
     }
 
     const result = {
@@ -117,37 +125,59 @@ export default async function handler(req, res) {
 async function listAllObjects(s3, bucket, prefix = '') {
   let allObjects = [];
   let continuationToken = undefined;
+  const MAX_KEYS = 1000;
 
   try {
     do {
       const params = {
         Bucket: bucket,
         Prefix: prefix,
-        MaxKeys: 1000, // Increase max keys per request
-        ContinuationToken: continuationToken
+        MaxKeys: MAX_KEYS,
+        ContinuationToken: continuationToken,
+        Delimiter: '/'
       };
-
-      console.log('Fetching objects with params:', {
-        bucket,
-        prefix,
-        continuationToken
-      });
 
       const response = await s3.listObjectsV2(params).promise();
       
+      // Process files in current directory
       if (response.Contents) {
-        allObjects = allObjects.concat(response.Contents);
-        console.log(`Found ${response.Contents.length} objects, total: ${allObjects.length}`);
+        const files = response.Contents.filter(obj => {
+          const key = obj.Key.toLowerCase();
+          return key.endsWith('.srt') && !key.endsWith('/');
+        });
+        allObjects = allObjects.concat(files);
+        console.log(`Found ${files.length} files in ${prefix || 'root'}, total: ${allObjects.length}`);
+      }
+
+      // Process subfolders
+      if (response.CommonPrefixes && response.CommonPrefixes.length > 0) {
+        console.log(`Found folders: ${response.CommonPrefixes.map(p => p.Prefix).join(', ')}`);
+        
+        // Recursively process each subfolder
+        const subfolderPromises = response.CommonPrefixes.map(async ({ Prefix }) => {
+          console.log(`Processing folder: ${Prefix}`);
+          const subfolderObjects = await listAllObjects(s3, bucket, Prefix);
+          return subfolderObjects;
+        });
+
+        const subfolderResults = await Promise.all(subfolderPromises);
+        subfolderResults.forEach(objects => {
+          allObjects = allObjects.concat(objects);
+        });
       }
       
       continuationToken = response.NextContinuationToken;
     } while (continuationToken);
 
-    console.log(`Total objects found: ${allObjects.length}`);
+    console.log(`Total files found in ${prefix || 'root'}: ${allObjects.length}`);
     return allObjects;
 
   } catch (error) {
-    console.error('Error listing objects:', error);
+    console.error('Error listing objects:', {
+      message: error.message,
+      prefix: prefix,
+      objectCount: allObjects.length
+    });
     throw error;
   }
 }
