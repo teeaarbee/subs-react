@@ -12,6 +12,11 @@ const searchCache = new NodeCache({
 });
 
 export default async function handler(req, res) {
+  // Add CORS and cache headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=7200');
+  
   // Set timeout for Vercel
   res.socket.setTimeout(9000); // 9 second timeout
   
@@ -35,7 +40,14 @@ export default async function handler(req, res) {
     secretAccessKey: process.env.CLOUDFLARE_SECRET_ACCESS_KEY,
     region: process.env.CLOUDFLARE_REGION,
     signatureVersion: 'v4',
-    httpOptions: { timeout: 5000 } // 5 second timeout for S3 requests
+    httpOptions: { 
+      timeout: 8000,
+      connectTimeout: 5000,
+      maxRetries: 3
+    },
+    computeChecksums: false,
+    s3ForcePathStyle: true,
+    maxRedirects: 3
   });
 
   const cacheKey = searchWord.toLowerCase();
@@ -107,10 +119,10 @@ async function listAllObjects(s3, bucket, prefix = '') {
 
 async function processFile(file, s3, searchWord) {
   return workerPool.execute(async () => {
-    const fileData = await s3.getObject({
+    const fileData = await fetchWithRetry(s3, {
       Bucket: process.env.CLOUDFLARE_BUCKET_NAME,
       Key: file.Key,
-    }).promise();
+    });
 
     const fileContent = fileData.Body.toString('utf-8');
     const lines = fileContent.split('\n');
@@ -132,4 +144,15 @@ async function processFile(file, s3, searchWord) {
     }
     return fileOccurrences;
   });
+}
+
+async function fetchWithRetry(s3, params, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await s3.getObject(params).promise();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+    }
+  }
 }
