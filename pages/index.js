@@ -38,23 +38,32 @@ const Home = () => {
         const response = await axios.post('/api/search', { 
           searchWord: searchTerm 
         }, {
-          timeout: 30000
+          timeout: 8000 // 8 second timeout
         });
         
         // Cache the results
         searchCache.current.set(cacheKey, response.data);
         setResults(response.data.occurrences);
         setTotalCount(response.data.totalCount);
+        
+        // Show message if results are partial
+        if (response.data.isPartial) {
+          setError('Showing first 10 matches. Refine your search for more specific results.');
+        }
       } catch (error) {
         console.error("Error searching files:", error);
-        setError(error.response?.data?.message || 'An error occurred while searching');
+        if (error.code === 'ECONNABORTED' || error.response?.status === 504) {
+          setError('Search timed out. Try a more specific search term.');
+        } else {
+          setError(error.response?.data?.message || 'An error occurred while searching');
+        }
         setResults([]);
         setTotalCount(0);
       } finally {
         setIsLoading(false);
       }
     }, 500),
-    []
+    [setResults, setTotalCount, setError, setIsLoading]
   );
 
   // Calculate paginated results

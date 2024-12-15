@@ -1,6 +1,9 @@
 import { S3 } from 'aws-sdk';
-import WorkerPool from '../../utils/workerPool';
 import NodeCache from 'node-cache';
+import WorkerPool from '../../utils/workerPool';
+
+// Initialize with smaller pool and shorter timeout
+const workerPool = new WorkerPool(3, 8000); // 8 second timeout
 
 // Initialize the cache with 1 hour TTL
 const searchCache = new NodeCache({ 
@@ -8,9 +11,10 @@ const searchCache = new NodeCache({
   maxKeys: process.env.MAX_CACHE_SIZE || 100
 });
 
-const workerPool = new WorkerPool(5, 30000);
-
 export default async function handler(req, res) {
+  // Set timeout for Vercel
+  res.socket.setTimeout(9000); // 9 second timeout
+  
   if (!process.env.CLOUDFLARE_ACCOUNT_ID || 
       !process.env.CLOUDFLARE_ACCESS_KEY_ID || 
       !process.env.CLOUDFLARE_SECRET_ACCESS_KEY) {
@@ -31,6 +35,7 @@ export default async function handler(req, res) {
     secretAccessKey: process.env.CLOUDFLARE_SECRET_ACCESS_KEY,
     region: process.env.CLOUDFLARE_REGION,
     signatureVersion: 'v4',
+    httpOptions: { timeout: 5000 } // 5 second timeout for S3 requests
   });
 
   const cacheKey = searchWord.toLowerCase();
@@ -50,24 +55,33 @@ export default async function handler(req, res) {
       searchCache.set(fileListCacheKey, srtFiles, 3600);
     }
 
+    // Limit to first 10 files for faster response
+    const limitedFiles = srtFiles.slice(0, 10);
+    
     const results = await Promise.all(
-      srtFiles.map(file => processFile(file, s3, searchWord))
+      limitedFiles.map(file => processFile(file, s3, searchWord))
     );
 
     const allOccurrences = results.flat();
     const result = {
       occurrences: allOccurrences,
-      totalCount: allOccurrences.length
+      totalCount: allOccurrences.length,
+      isPartial: srtFiles.length > 10 // Indicate if we're only showing partial results
     };
     
     searchCache.set(cacheKey, result);
     return res.status(200).json(result);
 
   } catch (error) {
-    console.error('Search error:', error);
+    console.error('Search error:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code
+    });
     return res.status(500).json({ 
       message: 'Error processing search', 
-      error: error.message 
+      error: error.message,
+      code: error.code || 'UNKNOWN_ERROR'
     });
   }
 }
