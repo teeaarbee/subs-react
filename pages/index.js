@@ -41,7 +41,7 @@ const Home = () => {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8">
           <div className="flex gap-3">
             <input
-              type="text"
+              type="text"   
               value={searchWord}
               onChange={(e) => setSearchWord(e.target.value)}
               placeholder="Enter word to search..."
@@ -112,7 +112,7 @@ const Home = () => {
 
         {!isLoading && results.length === 0 && searchWord && (
           <div className="text-center py-12 text-gray-600 dark:text-gray-300">
-            No results found for "{searchWord}"
+            No results found for &quot;{searchWord}&quot;
           </div>
         )}
       </div>
