@@ -1,5 +1,5 @@
 // pages/index.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import debounce from 'lodash/debounce';
 
@@ -9,20 +9,42 @@ const Home = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const RESULTS_PER_PAGE = 20;
+  const [processedFiles, setProcessedFiles] = useState(0);
+  const [totalFiles, setTotalFiles] = useState(0);
+  
+  // Client-side cache
+  const searchCache = useRef(new Map());
 
   // Debounced search function
   const debouncedSearch = useCallback(
     debounce(async (searchTerm) => {
       if (!searchTerm) return;
       
+      // Check client-side cache first
+      const cacheKey = searchTerm.toLowerCase();
+      if (searchCache.current.has(cacheKey)) {
+        const cachedData = searchCache.current.get(cacheKey);
+        setResults(cachedData.occurrences);
+        setTotalCount(cachedData.totalCount);
+        return;
+      }
+      
       setIsLoading(true);
       setError(null);
+      setResults([]);
+      setTotalCount(0);
+      
       try {
         const response = await axios.post('/api/search', { 
           searchWord: searchTerm 
         }, {
           timeout: 30000
         });
+        
+        // Cache the results
+        searchCache.current.set(cacheKey, response.data);
         setResults(response.data.occurrences);
         setTotalCount(response.data.totalCount);
       } catch (error) {
@@ -36,6 +58,17 @@ const Home = () => {
     }, 500),
     []
   );
+
+  // Calculate paginated results
+  const paginatedResults = useMemo(() => {
+    const start = (page - 1) * RESULTS_PER_PAGE;
+    return results.slice(start, start + RESULTS_PER_PAGE);
+  }, [results, page]);
+
+  // Reset page when search changes
+  useEffect(() => {
+    setPage(1);
+  }, [searchWord]);
 
   const handleInputChange = (e) => {
     const value = e.target.value;
@@ -90,7 +123,7 @@ const Home = () => {
         )}
 
         <div className="space-y-4">
-          {results.map((result, index) => (
+          {paginatedResults.map((result, index) => (
             <div 
               key={index} 
               className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow duration-200"
@@ -110,9 +143,39 @@ const Home = () => {
           ))}
         </div>
 
+        {/* Pagination controls */}
+        {totalCount > RESULTS_PER_PAGE && (
+          <div className="flex justify-center gap-2 mt-6">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-4 py-2 bg-blue-500 text-white rounded disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="px-4 py-2">
+              Page {page} of {Math.ceil(totalCount / RESULTS_PER_PAGE)}
+            </span>
+            <button
+              onClick={() => setPage(p => p + 1)}
+              disabled={page >= Math.ceil(totalCount / RESULTS_PER_PAGE)}
+              className="px-4 py-2 bg-blue-500 text-white rounded disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        )}
+
         {!isLoading && searchWord && totalCount === 0 && (
           <div className="text-center py-8 text-gray-600 dark:text-gray-300">
             No results found for &quot;{searchWord}&quot;
+          </div>
+        )}
+
+        {isLoading && totalFiles > 0 && (
+          <div className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+            Processing files: {processedFiles}/{totalFiles} 
+            ({Math.round((processedFiles / totalFiles) * 100)}%)
           </div>
         )}
       </div>

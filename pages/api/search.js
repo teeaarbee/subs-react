@@ -1,30 +1,16 @@
 import { S3 } from 'aws-sdk';
 import WorkerPool from '../../utils/workerPool';
+import NodeCache from 'node-cache';
 
-async function listAllObjects(s3, bucket, prefix = '') {
-  let allObjects = [];
-  let continuationToken = undefined;
-
-  do {
-    const params = {
-      Bucket: bucket,
-      Prefix: prefix,
-      ContinuationToken: continuationToken
-    };
-
-    const response = await s3.listObjectsV2(params).promise();
-    allObjects = allObjects.concat(response.Contents || []);
-    continuationToken = response.NextContinuationToken;
-  } while (continuationToken);
-
-  return allObjects;
-}
+// Initialize the cache with 1 hour TTL
+const searchCache = new NodeCache({ 
+  stdTTL: process.env.CACHE_TTL || 3600,
+  maxKeys: process.env.MAX_CACHE_SIZE || 100
+});
 
 const workerPool = new WorkerPool(5, 30000);
 
 export default async function handler(req, res) {
-  res.socket.setTimeout(60000);
-
   if (!process.env.CLOUDFLARE_ACCOUNT_ID || 
       !process.env.CLOUDFLARE_ACCESS_KEY_ID || 
       !process.env.CLOUDFLARE_SECRET_ACCESS_KEY) {
@@ -47,39 +33,62 @@ export default async function handler(req, res) {
     signatureVersion: 'v4',
   });
 
-  try {
-    const Contents = await listAllObjects(s3, process.env.CLOUDFLARE_BUCKET_NAME);
-    console.log('Files found:', Contents.length);
+  const cacheKey = searchWord.toLowerCase();
+  const cachedResult = searchCache.get(cacheKey);
+  if (cachedResult) {
+    console.log('Cache hit for:', searchWord);
+    return res.status(200).json(cachedResult);
+  }
 
-    const srtFiles = Contents.filter(file => file.Key.toLowerCase().endsWith('.srt'));
+  try {
+    const fileListCacheKey = 'srtFileList';
+    let srtFiles = searchCache.get(fileListCacheKey);
     
-    const batchSize = 5;
-    const results = [];
-    
-    for (let i = 0; i < srtFiles.length; i += batchSize) {
-      const batch = srtFiles.slice(i, i + batchSize);
-      const batchResults = await Promise.all(batch.map(file => processFile(file, s3, searchWord)));
-      results.push(...batchResults.flat());
-      console.log(`Processed ${i + batch.length}/${srtFiles.length} files`);
+    if (!srtFiles) {
+      const Contents = await listAllObjects(s3, process.env.CLOUDFLARE_BUCKET_NAME);
+      srtFiles = Contents.filter(file => file.Key.toLowerCase().endsWith('.srt'));
+      searchCache.set(fileListCacheKey, srtFiles, 3600);
     }
 
+    const results = await Promise.all(
+      srtFiles.map(file => processFile(file, s3, searchWord))
+    );
+
     const allOccurrences = results.flat();
-    return res.status(200).json({
+    const result = {
       occurrences: allOccurrences,
       totalCount: allOccurrences.length
-    });
+    };
+    
+    searchCache.set(cacheKey, result);
+    return res.status(200).json(result);
 
   } catch (error) {
-    console.error('Detailed error:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
+    console.error('Search error:', error);
     return res.status(500).json({ 
       message: 'Error processing search', 
       error: error.message 
     });
   }
+}
+
+async function listAllObjects(s3, bucket, prefix = '') {
+  let allObjects = [];
+  let continuationToken = undefined;
+
+  do {
+    const params = {
+      Bucket: bucket,
+      Prefix: prefix,
+      ContinuationToken: continuationToken
+    };
+
+    const response = await s3.listObjectsV2(params).promise();
+    allObjects = allObjects.concat(response.Contents || []);
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  return allObjects;
 }
 
 async function processFile(file, s3, searchWord) {
