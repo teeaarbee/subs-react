@@ -31,10 +31,10 @@ const Home = () => {
       <div className="max-w-6xl mx-auto px-4 py-12">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
-            Subtitle Word Finder
+            Besttt Friends Finder
           </h1>
           <p className="text-gray-600 dark:text-gray-300">
-            Search through your subtitle files instantly
+            Search through any episode of friends instantly
           </p>
         </div>
 
