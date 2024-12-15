@@ -1,4 +1,5 @@
 import { S3 } from 'aws-sdk';
+import WorkerPool from '../../utils/workerPool';
 
 async function listAllObjects(s3, bucket, prefix = '') {
   let allObjects = [];
@@ -18,6 +19,8 @@ async function listAllObjects(s3, bucket, prefix = '') {
 
   return allObjects;
 }
+
+const workerPool = new WorkerPool(5); // Adjust pool size based on your needs
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -44,49 +47,44 @@ export default async function handler(req, res) {
     const srtFiles = Contents.filter(file => file.Key.toLowerCase().endsWith('.srt'));
 
     const processFile = async (file) => {
-      const fileData = await s3.getObject({
-        Bucket: process.env.CLOUDFLARE_BUCKET_NAME,
-        Key: file.Key,
-      }).promise();
+      return workerPool.execute(async () => {
+        const fileData = await s3.getObject({
+          Bucket: process.env.CLOUDFLARE_BUCKET_NAME,
+          Key: file.Key,
+        }).promise();
 
-      const fileContent = fileData.Body.toString('utf-8');
-      const lines = fileContent.split('\n');
-      let fileOccurrences = [];
+        const fileContent = fileData.Body.toString('utf-8');
+        const lines = fileContent.split('\n');
+        let fileOccurrences = [];
 
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() === '' || lines[i].includes('-->')) {
-          continue;
-        }
-
-        if (lines[i].toLowerCase().includes(searchWord.toLowerCase())) {
-          let timestamp = '';
-          if (i > 1) {
-            timestamp = lines[i - 1].trim();
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trim() === '' || lines[i].includes('-->')) {
+            continue;
           }
 
-          fileOccurrences.push({
-            fileName: file.Key,
-            timestamp: timestamp,
-            subtitleText: lines[i].trim()
-          });
+          if (lines[i].toLowerCase().includes(searchWord.toLowerCase())) {
+            let timestamp = '';
+            if (i > 1) {
+              timestamp = lines[i - 1].trim();
+            }
+
+            fileOccurrences.push({
+              fileName: file.Key,
+              timestamp: timestamp,
+              subtitleText: lines[i].trim()
+            });
+          }
         }
-      }
-      return fileOccurrences;
+        return fileOccurrences;
+      });
     };
 
-    const batchSize = 5;
-    let allOccurrences = [];
-    for (let i = 0; i < srtFiles.length; i += batchSize) {
-      const batch = srtFiles.slice(i, i + batchSize);
-      const batchResults = await Promise.all(batch.map(processFile));
-      allOccurrences = allOccurrences.concat(batchResults.flat());
-    }
-
-    const totalCount = allOccurrences.length;
+    const results = await Promise.all(srtFiles.map(processFile));
+    const allOccurrences = results.flat();
 
     return res.status(200).json({
       occurrences: allOccurrences,
-      totalCount
+      totalCount: allOccurrences.length
     });
 
   } catch (error) {
