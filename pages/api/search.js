@@ -67,18 +67,34 @@ export default async function handler(req, res) {
       searchCache.set(fileListCacheKey, srtFiles, 3600);
     }
 
-    // Limit to first 10 files for faster response
-    const limitedFiles = srtFiles.slice(0, 10);
-    
-    const results = await Promise.all(
-      limitedFiles.map(file => processFile(file, s3, searchWord))
-    );
+    // Instead of limiting to first 10 files, let's process in batches
+    const BATCH_SIZE = 20; // Increase from 10 to 20
+    const allFiles = srtFiles.filter(file => {
+      // Add any specific folder patterns you want to include
+      return file.Key.toLowerCase().endsWith('.srt');
+    });
 
-    const allOccurrences = results.flat();
+    console.log(`Total SRT files found: ${allFiles.length}`);
+
+    // Process files in batches
+    const batches = [];
+    for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
+      batches.push(allFiles.slice(i, i + BATCH_SIZE));
+    }
+
+    let allOccurrences = [];
+    for (const batch of batches) {
+      const results = await Promise.all(
+        batch.map(file => processFile(file, s3, searchWord))
+      );
+      allOccurrences = allOccurrences.concat(results.flat());
+    }
+
     const result = {
       occurrences: allOccurrences,
       totalCount: allOccurrences.length,
-      isPartial: srtFiles.length > 10 // Indicate if we're only showing partial results
+      totalFiles: allFiles.length,
+      processedFiles: allFiles.length
     };
     
     searchCache.set(cacheKey, result);
@@ -102,19 +118,38 @@ async function listAllObjects(s3, bucket, prefix = '') {
   let allObjects = [];
   let continuationToken = undefined;
 
-  do {
-    const params = {
-      Bucket: bucket,
-      Prefix: prefix,
-      ContinuationToken: continuationToken
-    };
+  try {
+    do {
+      const params = {
+        Bucket: bucket,
+        Prefix: prefix,
+        MaxKeys: 1000, // Increase max keys per request
+        ContinuationToken: continuationToken
+      };
 
-    const response = await s3.listObjectsV2(params).promise();
-    allObjects = allObjects.concat(response.Contents || []);
-    continuationToken = response.NextContinuationToken;
-  } while (continuationToken);
+      console.log('Fetching objects with params:', {
+        bucket,
+        prefix,
+        continuationToken
+      });
 
-  return allObjects;
+      const response = await s3.listObjectsV2(params).promise();
+      
+      if (response.Contents) {
+        allObjects = allObjects.concat(response.Contents);
+        console.log(`Found ${response.Contents.length} objects, total: ${allObjects.length}`);
+      }
+      
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+
+    console.log(`Total objects found: ${allObjects.length}`);
+    return allObjects;
+
+  } catch (error) {
+    console.error('Error listing objects:', error);
+    throw error;
+  }
 }
 
 async function processFile(file, s3, searchWord) {
