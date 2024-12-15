@@ -1,12 +1,27 @@
 class WorkerPool {
-  constructor(size) {
+  constructor(size, timeout = 30000) {
     this.tasks = [];
     this.workers = new Array(size).fill(null);
+    this.timeout = timeout;
   }
 
   async execute(task) {
     return new Promise((resolve, reject) => {
-      this.tasks.push({ task, resolve, reject });
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Task timeout'));
+      }, this.timeout);
+
+      this.tasks.push({
+        task,
+        resolve: (result) => {
+          clearTimeout(timeoutId);
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        }
+      });
       this.runNext();
     });
   }

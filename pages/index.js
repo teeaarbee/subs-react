@@ -8,6 +8,7 @@ const Home = () => {
   const [results, setResults] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   // Debounced search function
   const debouncedSearch = useCallback(
@@ -15,12 +16,20 @@ const Home = () => {
       if (!searchTerm) return;
       
       setIsLoading(true);
+      setError(null);
       try {
-        const response = await axios.post('/api/search', { searchWord: searchTerm });
+        const response = await axios.post('/api/search', { 
+          searchWord: searchTerm 
+        }, {
+          timeout: 30000
+        });
         setResults(response.data.occurrences);
         setTotalCount(response.data.totalCount);
       } catch (error) {
         console.error("Error searching files:", error);
+        setError(error.response?.data?.message || 'An error occurred while searching');
+        setResults([]);
+        setTotalCount(0);
       } finally {
         setIsLoading(false);
       }
@@ -71,6 +80,12 @@ const Home = () => {
         {totalCount > 0 && !isLoading && (
           <div className="text-sm text-gray-600 dark:text-gray-300 mb-4">
             Found {totalCount} matches in {results.length} scenes
+          </div>
+        )}
+
+        {error && (
+          <div className="text-center py-4 text-red-600 dark:text-red-400">
+            {error}
           </div>
         )}
 
