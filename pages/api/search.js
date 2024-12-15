@@ -40,8 +40,13 @@ export default async function handler(req, res) {
   console.log('Bucket name:', process.env.CLOUDFLARE_BUCKET_NAME);
 
   try {
+    console.log('Starting search with config:', {
+      endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      region: process.env.CLOUDFLARE_REGION,
+      bucket: process.env.CLOUDFLARE_BUCKET_NAME
+    });
+
     const Contents = await listAllObjects(s3, process.env.CLOUDFLARE_BUCKET_NAME);
-    
     console.log('Files found:', Contents.length);
 
     let occurrences = [];
@@ -98,7 +103,15 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Error processing search:', error);
-    return res.status(500).json({ message: 'Error processing search', error: error.message });
+    console.error('Detailed error:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code
+    });
+    return res.status(500).json({ 
+      message: 'Error processing search', 
+      error: error.message,
+      errorCode: error.code 
+    });
   }
 }
