@@ -11,8 +11,6 @@ const Home = () => {
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const RESULTS_PER_PAGE = 20;
-  const [processedFiles, setProcessedFiles] = useState(0);
-  const [totalFiles, setTotalFiles] = useState(0);
   
   // Client-side cache
   const searchCache = useRef(new Map());
@@ -169,13 +167,6 @@ const Home = () => {
         {!isLoading && searchWord && totalCount === 0 && (
           <div className="text-center py-8 text-gray-600 dark:text-gray-300">
             No results found for &quot;{searchWord}&quot;
-          </div>
-        )}
-
-        {isLoading && totalFiles > 0 && (
-          <div className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-            Processing files: {processedFiles}/{totalFiles} 
-            ({Math.round((processedFiles / totalFiles) * 100)}%)
           </div>
         )}
       </div>
