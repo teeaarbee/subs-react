@@ -1,5 +1,24 @@
 import { S3 } from 'aws-sdk';
 
+async function listAllObjects(s3, bucket, prefix = '') {
+  let allObjects = [];
+  let continuationToken = undefined;
+
+  do {
+    const params = {
+      Bucket: bucket,
+      Prefix: prefix,
+      ContinuationToken: continuationToken
+    };
+
+    const response = await s3.listObjectsV2(params).promise();
+    allObjects = allObjects.concat(response.Contents || []);
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  return allObjects;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
@@ -21,16 +40,16 @@ export default async function handler(req, res) {
   console.log('Bucket name:', process.env.CLOUDFLARE_BUCKET_NAME);
 
   try {
-    const { Contents } = await s3.listObjectsV2({
-      Bucket: process.env.CLOUDFLARE_BUCKET_NAME,
-    }).promise();
-
+    const Contents = await listAllObjects(s3, process.env.CLOUDFLARE_BUCKET_NAME);
+    
     console.log('Files found:', Contents.length);
 
     let occurrences = [];
     let totalCount = 0;
 
-    for (const file of Contents) {
+    const srtFiles = Contents.filter(file => file.Key.toLowerCase().endsWith('.srt'));
+
+    for (const file of srtFiles) {
       console.log('Processing file:', file.Key);
 
       const fileData = await s3.getObject({
@@ -65,6 +84,13 @@ export default async function handler(req, res) {
         }
       }
     }
+
+    occurrences.sort((a, b) => {
+      if (a.fileName === b.fileName) {
+        return a.timestamp.localeCompare(b.timestamp);
+      }
+      return a.fileName.localeCompare(b.fileName);
+    });
 
     return res.status(200).json({
       occurrences,
