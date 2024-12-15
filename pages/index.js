@@ -38,7 +38,7 @@ const Home = () => {
         const response = await axios.post('/api/search', { 
           searchWord: searchTerm 
         }, {
-          timeout: 8000 // 8 second timeout
+          timeout: 20000 // Increase to 20 seconds
         });
         
         // Cache the results

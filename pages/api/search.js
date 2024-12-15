@@ -3,7 +3,7 @@ import NodeCache from 'node-cache';
 import WorkerPool from '../../utils/workerPool';
 
 // Initialize with smaller pool and shorter timeout
-const workerPool = new WorkerPool(3, 8000); // 8 second timeout
+const workerPool = new WorkerPool(5, 15000); // 15 second timeout
 
 // Initialize the cache with 1 hour TTL
 const searchCache = new NodeCache({ 
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=7200');
   
   // Set timeout for Vercel
-  res.socket.setTimeout(9000); // 9 second timeout
+  res.socket.setTimeout(20000); // 20 second timeout
   
   if (!process.env.CLOUDFLARE_ACCOUNT_ID || 
       !process.env.CLOUDFLARE_ACCESS_KEY_ID || 
@@ -41,8 +41,8 @@ export default async function handler(req, res) {
     region: process.env.CLOUDFLARE_REGION,
     signatureVersion: 'v4',
     httpOptions: { 
-      timeout: 8000,
-      connectTimeout: 5000,
+      timeout: 15000, // 15 seconds
+      connectTimeout: 8000,
       maxRetries: 3
     },
     computeChecksums: false,
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
     }
 
     // Instead of limiting to first 10 files, let's process in batches
-    const BATCH_SIZE = 20; // Increase from 10 to 20
+    const BATCH_SIZE = 10; // Smaller batch size
     const allFiles = srtFiles.filter(file => {
       // Add any specific folder patterns you want to include
       return file.Key.toLowerCase().endsWith('.srt');
