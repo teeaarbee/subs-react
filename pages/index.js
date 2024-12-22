@@ -16,6 +16,7 @@ const Home = () => {
   const searchCache = useRef(new Map());
 
   // Debounced search function
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedSearch = useCallback(
     debounce(async (searchTerm) => {
       if (!searchTerm) return;

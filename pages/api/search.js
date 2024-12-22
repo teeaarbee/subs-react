@@ -1,6 +1,5 @@
 import { Pool } from 'pg';
 import NodeCache from 'node-cache';
-import { optimizeSearchTerm } from '../../utils/searchOptimizer';
 
 // Replace S3 and WorkerPool with PostgreSQL pool
 const pool = new Pool({
